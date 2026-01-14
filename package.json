@@ -1,5 +1,5 @@
 {
-  "name": "esp01-server",
+  "name": "esp01-server-1",
   "version": "1.0.0",
   "main": "server.js",
   "dependencies": {
