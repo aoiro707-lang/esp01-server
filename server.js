@@ -8,7 +8,7 @@ let lastPing = 0;
 let timerEnd = 0; // Thời gian kết thúc hẹn giờ (Unix timestamp)
 
 // --- TỰ ĐỘNG WAKE UP MỖI 9 PHÚT 59 GIÂY ---
-const SERVER_URL = 'https://esp01-server.onrender.com/ping?wake=true';
+const SERVER_URL = 'https://esp01-server.onrender-1.com/ping?wake=true';
 setInterval(() => {
     fetch(SERVER_URL)
         .then(() => console.log('Self-ping thành công để giữ server thức!'))
