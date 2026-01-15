@@ -7,6 +7,30 @@ app.use(express.json());
 
 let devices = {}; 
 
+app.get('/ping', (req, res) => {
+    const { id, wifi, name } = req.query;
+    
+    // Nếu thiếu ID, server sẽ báo lỗi 400 - Đây chính là nguyên nhân bạn thấy lỗi 400
+    if (!id) {
+        console.log("Lỗi: Nhận Ping nhưng không có ID");
+        return res.status(400).send("Missing ID");
+    }
+
+    if (!devices[id]) {
+        devices[id] = { 
+            name: name || "Relay ESP", 
+            state: "OFF", 
+            schedules: [],
+            wifi: wifi || "Unknown" 
+        };
+    }
+    
+    devices[id].wifi = wifi || devices[id].wifi;
+    devices[id].lastPing = Date.now();
+    console.log(`Thiết bị [${id}] đã Online từ WiFi: [${wifi}]`);
+    res.send("OK");
+});
+
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
