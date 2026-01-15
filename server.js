@@ -68,7 +68,7 @@ function saveSchedule() {
     document.querySelectorAll('.day').forEach(c => days += c.checked ? "1" : "0");
     let tOn = document.getElementById('tOn').value;
     let tOff = document.getElementById('tOff').value;
-    fetch(`/set-schedule?on=${tOn}&off=${tOff}&days=${days}`);
+    fetch(`/set-schedule?on=${tOn}&off=${tOff}&days=\${days}`);
 }
 </script>
 
