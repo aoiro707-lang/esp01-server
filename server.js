@@ -61,73 +61,99 @@ app.get('/', (req, res) => {
         <h2>IoT ESP01s Control System</h2>
         <div id="device-list">Đang tải thiết bị...</div>
     </div>
-    <script>
-        let devices = {};
-        function render() {
-            const listEl = document.getElementById('device-list');
-            const groups = {};
-            const ids = Object.keys(devices);
-            if (ids.length === 0) { listEl.innerHTML = "Chưa có thiết bị nào Online"; return; }
-            
-            ids.forEach(id => {
-                const wifi = devices[id].wifi || "Unknown WiFi";
-                if (!groups[wifi]) groups[wifi] = [];
-                groups[wifi].push({id, ...devices[id]});
-            });
+<script>
+    let devices = {};
+    let activeBoxId = null; // Biến ghi nhớ khung đang mở
 
-            let html = "";
-            for (let wifi in groups) {
-                html += \`<div class="wifi-group"><div class="wifi-header">Wifi: \${wifi}</div>\`;
-                groups[wifi].forEach(dev => {
-                    html += \`<div class="device-row">
-                        <div class="dev-info">
-                            <span class="dev-name" onclick="rename('\${dev.id}', '\${dev.name}')">\${dev.name}</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" \${dev.state==='ON'?'checked':''} onchange="toggle('\${dev.id}', this.checked)">
-                            <span class="slider"></span>
-                        </label>
-                        <span class="more-btn" onclick="toggleSched('\${dev.id}')">...</span>
+    function render() {
+        const listEl = document.getElementById('device-list');
+        const groups = {};
+        const ids = Object.keys(devices);
+        if (ids.length === 0) { listEl.innerHTML = "Chưa có thiết bị nào Online"; return; }
+        
+        ids.forEach(id => {
+            const wifi = devices[id].wifi || "Unknown WiFi";
+            if (!groups[wifi]) groups[wifi] = [];
+            groups[wifi].push({id, ...devices[id]});
+        });
+
+        let html = "";
+        for (let wifi in groups) {
+            html += `<div class="wifi-group"><div class="wifi-header">Wifi: ${wifi}</div>`;
+            groups[wifi].forEach(dev => {
+                // Kiểm tra xem box này có đang được mở không
+                const displayStyle = (activeBoxId === dev.id) ? 'block' : 'none';
+                
+                html += `<div class="device-row">
+                    <div class="dev-info">
+                        <span class="dev-name" onclick="rename('${dev.id}', '${dev.name}')">${dev.name}</span>
+                        <div style="font-size:10px; color:#999">ID: ${dev.id}</div>
                     </div>
-                    <div id="box-\${dev.id}" class="sched-box">
-                        <input type="time" id="on-\${dev.id}"> đến <input type="time" id="off-\${dev.id}">
-                        <button onclick="addSched('\${dev.id}')">Lưu 💾</button>
-                        <div id="list-\${dev.id}">
-                            \${(dev.schedules || []).map((s, idx) => \`
-                                <div style="font-size:12px; margin-top:5px;">🕒 \${s.on} - \${s.off} <span style="color:red;cursor:pointer" onclick="delSched('\${dev.id}',\${idx})">✕</span></div>
-                            \`).join('')}
-                        </div>
-                    </div>\`;
-                });
-                html += "</div>";
-            }
-            listEl.innerHTML = html;
+                    <label class="switch">
+                        <input type="checkbox" ${dev.state==='ON'?'checked':''} onchange="toggle('${dev.id}', this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="more-btn" onclick="toggleSched('${dev.id}')">...</span>
+                </div>
+                <div id="box-${dev.id}" class="sched-box" style="display: ${displayStyle}">
+                    <div style="background:#f9f9f9; padding:10px; border-radius:8px;">
+                        <input type="time" id="on-${dev.id}"> đến <input type="time" id="off-${dev.id}">
+                        <button onclick="addSched('${dev.id}')" style="background:#3498db; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">Lưu 💾</button>
+                    </div>
+                    <div id="list-${dev.id}" style="margin-top:10px;">
+                        ${(dev.schedules || []).map((s, idx) => `
+                            <div style="font-size:12px; margin-top:5px; display:flex; justify-content:space-between; background:#fff; padding:5px; border:1px solid #eee;">
+                                <span>🕒 ${s.on} - ${s.off}</span>
+                                <span style="color:red; cursor:pointer; font-weight:bold;" onclick="delSched('${dev.id}',${idx})">✕</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+            });
+            html += "</div>";
         }
-        async function updateData() {
-            try {
-                const res = await fetch('/all-data');
-                devices = await res.json();
-                render();
-            } catch (e) { console.error(e); }
+        listEl.innerHTML = html;
+    }
+
+    async function updateData() {
+        try {
+            const res = await fetch('/all-data');
+            devices = await res.json();
+            render();
+        } catch (e) { console.error(e); }
+    }
+
+    function toggleSched(id) { 
+        // Nếu bấm vào cái đang mở thì đóng lại, nếu bấm cái mới thì ghi nhớ ID đó
+        activeBoxId = (activeBoxId === id) ? null : id;
+        render(); // Vẽ lại ngay lập tức để hiện/ẩn
+    }
+
+    function addSched(id) {
+        let on = document.getElementById('on-'+id).value;
+        let off = document.getElementById('off-'+id).value;
+        if(on && off) {
+            fetch(`/add-sched?id=${id}&on=${on}&off=${off}&days=1111111`)
+            .then(() => {
+                alert("Đã lưu lịch trình!");
+                updateData();
+            });
+        } else {
+            alert("Vui lòng chọn đầy đủ giờ Bật và Tắt");
         }
-        function rename(id, old) { 
-            let n = prompt("Tên mới:", old); 
-            if(n) fetch(\`/rename?id=\${id}&name=\${encodeURIComponent(n)}\`).then(updateData); 
-        }
-        function toggle(id, s) { fetch(\`/relay?id=\${id}&state=\${s?'ON':'OFF'}\`); }
-        function toggleSched(id) { 
-            let e = document.getElementById('box-'+id); 
-            e.style.display = e.style.display==='block'?'none':'block'; 
-        }
-        function addSched(id) {
-            let on = document.getElementById('on-'+id).value;
-            let off = document.getElementById('off-'+id).value;
-            if(on && off) fetch(\`/add-sched?id=\${id}&on=\${on}&off=\${off}&days=1111111\`).then(updateData);
-        }
-        function delSched(id, idx) { fetch(\`/del-sched?id=\${id}&idx=\${idx}\`).then(updateData); }
-        setInterval(updateData, 3000);
-        updateData();
-    </script>
+    }
+
+    function rename(id, old) { 
+        let n = prompt("Tên mới:", old); 
+        if(n) fetch(`/rename?id=${id}&name=${encodeURIComponent(n)}`).then(updateData); 
+    }
+    
+    function toggle(id, s) { fetch(`/relay?id=${id}&state=${s?'ON':'OFF'}`); }
+    function delSched(id, idx) { fetch(`/del-sched?id=${id}&idx=${idx}`).then(updateData); }
+
+    setInterval(updateData, 5000); // Tăng lên 5 giây để tránh lag
+    updateData();
+</script>    
 </body>
 </html>
     `);
