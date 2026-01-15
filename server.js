@@ -56,7 +56,6 @@ app.get('/', (req, res) => {
     </div>
     <button class="btn on" onclick="saveSchedule()">LƯU LỊCH</button>
 </div>
-
 <script>
 function toggleAll() {
     let checks = document.querySelectorAll('.day');
@@ -73,23 +72,6 @@ function saveSchedule() {
 }
 </script>
 
-// Trong phần HTML (res.send), thêm giao diện:
-/*
-    <div class="card">
-        <h2>IOT ESP01s</h2>
-        <div class="status" id="wifi">WiFi: --</div>
-        <div class="status" id="relay">Relay: --</div>
-        <div id="countdown"></div>
-
-        <button class="btn on" onclick="ctrl('ON')">BẬT</button>
-        <button class="btn off" onclick="ctrl('OFF')">TẮT</button>
-        <hr>
-        <h4>Hẹn giờ tắt (Phút)</h4>
-        <button class="btn timer-btn" onclick="setTimer(1)">1 Phút</button>
-        <button class="btn timer-btn" onclick="setTimer(10)">10 Phút</button>
-        <button class="btn timer-btn" onclick="setTimer(30)">30 Phút</button>
-    </div>
-*/
     <script>
         function ctrl(s) { fetch('/relay?state=' + s); }
         function setTimer(m) { fetch('/set-timer?min=' + m); }
