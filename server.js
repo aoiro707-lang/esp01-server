@@ -1,16 +1,17 @@
 const express = require('express');
-const fetch = require('node-fetch');
 const app = express();
 
-let relayState = "OFF";
-let wifiName = "UNKNOWN";
-let lastPing = 0;
-
-let schedule = {
-    on: "00:00",
-    off: "00:00",
-    days: "0000000",
-    version: 0
+// Cấu trúc dữ liệu cho nhiều thiết bị
+let devices = {
+    "dev01": { 
+        name: "Relay 01", 
+        state: "OFF", 
+        wifi: "Vinatoken_UCO", 
+        lastPing: Date.now(),
+        schedules: [] // Mảng chứa các lịch trình: {on: "02:06", off: "02:30", days: "1111111"}
+    },
+    "dev02": { name: "Relay 02", state: "OFF", wifi: "UNKNOWN", lastPing: 0, schedules: [] },
+    "dev03": { name: "Relay 03", state: "OFF", wifi: "UNKNOWN", lastPing: 0, schedules: [] }
 };
 
 app.get('/', (req, res) => {
@@ -19,164 +20,133 @@ app.get('/', (req, res) => {
 <html>
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ESP01s Smart Control</title>
+    <title>ESP01s Dashboard</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #f0f2f5; padding: 20px; color: #333; }
-        .card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto 20px; }
-        .btn { width: 45%; padding: 12px; margin: 5px; border-radius: 8px; border: none; cursor: pointer; color: white; font-weight: bold; transition: 0.3s; }
-        .on { background: #2ecc71; } .off { background: #e74c3c; }
-        .save { background: #3498db; width: 93%; margin-top: 15px; }
-        .clear { background: #95a5a6; width: 93%; margin-top: 5px; }
-        .day-wrap { display: flex; justify-content: space-around; margin: 15px 0; flex-wrap: wrap; background: #f8f9fa; padding: 10px; border-radius: 8px; }
-        .day-item { font-size: 11px; display: flex; flex-direction: column; align-items: center; }
-        .wifi-status { font-weight: bold; margin-bottom: 10px; font-size: 14px; padding: 5px; border-radius: 20px; }
-        .sched-preview { background: #e8f4fd; padding: 10px; border-radius: 8px; margin-top: 15px; border-left: 4px solid #3498db; text-align: left; }
-        .day-tag { display: inline-block; background: #3498db; color: white; padding: 2px 6px; border-radius: 4px; margin: 2px; font-size: 10px; }
+        body { font-family: 'Segoe UI', sans-serif; background: #fdfdfd; padding: 15px; }
+        .header { color: #e74c3c; font-weight: bold; font-size: 20px; margin-bottom: 5px; }
+        .wifi-tag { display: inline-block; background: #e8fcf0; color: #2ecc71; padding: 4px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 20px; }
+        
+        .device-card { border-bottom: 1px solid #eee; padding: 15px 0; max-width: 500px; }
+        .row { display: flex; justify-content: space-between; align-items: center; }
+        .dev-name { font-weight: bold; font-size: 16px; flex-grow: 1; }
+        
+        /* CSS Công tắc gạt */
+        .switch { position: relative; display: inline-block; width: 50px; height: 26px; margin-right: 15px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #2ecc71; }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        .more-btn { cursor: pointer; font-size: 20px; color: #666; padding: 0 10px; }
+        
+        /* Khung Schedule */
+        .sched-box { border: 1px solid #2ecc71; border-radius: 4px; padding: 10px; margin-top: 10px; display: none; }
+        .sched-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
+        .day-check { font-size: 10px; text-align: center; }
+        .save-btn { cursor: pointer; color: #3498db; font-size: 22px; }
+        .del-btn { color: #e74c3c; cursor: pointer; font-weight: bold; margin-left: 10px; }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h3>Hệ thống ESP01s</h3>
-        <div id="wifi-info" class="wifi-status">Checking...</div>
-        <hr style="opacity: 0.1">
-        <h4>Điều khiển nhanh</h4>
-        <button class="btn on" onclick="ctrl('ON')">BẬT</button>
-        <button class="btn off" onclick="ctrl('OFF')">TẮT</button>
-    </div>
+    <div class="header">ESP01s control system</div>
+    <div class="wifi-tag" id="main-wifi">● Vinatoken_UCO Connected</div>
 
-    <div class="card">
-        <h3>Lập lịch định kỳ</h3>
-        <div>
-            Bật: <input type="time" id="tOn" value="${schedule.on}"> 
-            Tắt: <input type="time" id="tOff" value="${schedule.off}">
-        </div>
-        
-        <div class="day-wrap">
-            <button onclick="toggleAll()" style="width:100%; margin-bottom:10px; cursor:pointer;">Chọn/Bỏ tất cả</button>
-            ${['T2','T3','T4','T5','T6','T7','CN'].map((d, i) => `
-                <div class="day-item">
-                    <span>${d}</span>
-                    <input type="checkbox" class="day" value="${i}" ${schedule.days[i] === '1' ? 'checked' : ''}>
-                </div>
-            `).join('')}
-        </div>
-        <button class="btn save" onclick="saveSchedule()">LƯU LỊCH TRÌNH</button>
-        <button class="btn clear" onclick="clearSchedule()">XÓA LỊCH TRÌNH</button>
-
-        <div id="sched-display" class="sched-preview">
-            <strong>Lịch hiện tại:</strong> <span id="summary-text">Chưa cấu hình</span>
-            <div id="summary-days"></div>
-        </div>
-    </div>
+    <div id="device-list"></div>
 
     <script>
-        const dayNames = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ Nhật'];
+        let devData = ${JSON.stringify(devices)};
 
-        function ctrl(s) { fetch('/relay?state=' + s); }
+        function renderDevices() {
+            let html = "";
+            for (let id in devData) {
+                let dev = devData[id];
+                html += \`
+                <div class="device-card">
+                    <div class="row">
+                        <span class="dev-name">\${dev.name}</span>
+                        <label class="switch">
+                            <input type="checkbox" \${dev.state === 'ON' ? 'checked' : ''} onchange="toggleDev('\${id}', this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="more-btn" onclick="toggleBox('\${id}')">...</span>
+                    </div>
+                    
+                    <div id="box-\${id}" class="sched-box">
+                        <div class="sched-row">
+                            <strong>Schedule</strong> 
+                            ON <input type="time" id="on-\${id}"> 
+                            OFF <input type="time" id="off-\${id}">
+                            <span class="save-btn" onclick="saveSched('\${id}')">💾</span>
+                        </div>
+                        <div class="sched-row" style="border-top: 1px solid #eee; padding-top:5px;">
+                            \${['T2','T3','T4','T5','T6','T7','CN'].map((d,i) => \`
+                                <div class="day-check">
+                                    \${d}<br><input type="checkbox" class="day-\${id}" value="\${i}">
+                                </div>
+                            \`).join('')}
+                            <div class="day-check">All<br><input type="checkbox" onchange="toggleAll('\${id}', this.checked)"></div>
+                        </div>
+                    </div>
 
-        function toggleAll() {
-            let checks = document.querySelectorAll('.day');
-            let anyUnchecked = Array.from(checks).some(c => !c.checked);
-            checks.forEach(c => c.checked = anyUnchecked);
+                    <div id="list-\${id}" style="margin-top: 10px; font-size: 13px;">
+                        \${dev.schedules.map((s, idx) => \`
+                            <div style="display:flex; align-items:center; color:#2ecc71; margin-bottom:3px;">
+                                🕒 \${s.on} | \${s.off} 
+                                <span class="del-btn" onclick="delSched('\${id}', \${idx})">✘</span>
+                            </div>
+                        \`).join('')}
+                    </div>
+                </div>\`;
+            }
+            document.getElementById('device-list').innerHTML = html;
         }
 
-        function saveSchedule() {
-            let dStr = "";
-            let selectedDays = [];
-            document.querySelectorAll('.day').forEach((c, i) => {
-                if(c.checked) { dStr += "1"; selectedDays.push(dayNames[i]); }
-                else { dStr += "0"; }
-            });
-            let on = document.getElementById('tOn').value;
-            let off = document.getElementById('tOff').value;
+        function toggleBox(id) {
+            let b = document.getElementById('box-' + id);
+            b.style.display = b.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function toggleDev(id, state) {
+            fetch(\`/relay?id=\${id}&state=\${state ? 'ON' : 'OFF'}\`);
+        }
+
+        function toggleAll(id, check) {
+            document.querySelectorAll('.day-' + id).forEach(i => i.checked = check);
+        }
+
+        function saveSched(id) {
+            let on = document.getElementById('on-' + id).value;
+            let off = document.getElementById('off-' + id).value;
+            let days = "";
+            document.querySelectorAll('.day-' + id).forEach(i => days += i.checked ? "1" : "0");
             
-            fetch(\`/set-schedule?on=\${on}&off=\${off}&days=\${dStr}\`)
-                .then(() => {
-                    updateSchedUI(on, off, selectedDays);
-                    alert("Đã lưu lịch!");
-                });
+            fetch(\`/add-sched?id=\${id}&on=\${on}&off=\${off}&days=\${days}\`).then(() => location.reload());
         }
 
-        function clearSchedule() {
-            if(confirm("Bạn có chắc muốn xóa toàn bộ lịch trình?")) {
-                fetch('/set-schedule?on=00:00&off=00:00&days=0000000')
-                    .then(() => {
-                        document.querySelectorAll('.day').forEach(c => c.checked = false);
-                        updateSchedUI("00:00", "00:00", []);
-                        alert("Đã xóa lịch!");
-                    });
-            }
+        function delSched(id, idx) {
+            fetch(\`/del-sched?id=\${id}&idx=\${idx}\`).then(() => location.reload());
         }
 
-        function updateSchedUI(on, off, daysArray) {
-            const summary = document.getElementById('summary-text');
-            const daysDiv = document.getElementById('summary-days');
-            if (on === "00:00" && off === "00:00") {
-                summary.innerHTML = "Trống";
-                daysDiv.innerHTML = "";
-            } else {
-                summary.innerHTML = \`Bật: <b>\${on}</b> | Tắt: <b>\${off}</b>\`;
-                daysDiv.innerHTML = daysArray.map(d => \`<span class="day-tag">\${d}</span>\`).join('');
-            }
-        }
-
-        function updateStatus() {
-            fetch('/status').then(r => r.json()).then(data => {
-                const wifiInfo = document.getElementById('wifi-info');
-                if(data.online) {
-                    wifiInfo.innerHTML = "● " + data.wifi + " Connected";
-                    wifiInfo.style.background = "#eafaf1";
-                    wifiInfo.style.color = "#2ecc71";
-                } else {
-                    wifiInfo.innerHTML = "○ Device Offline";
-                    wifiInfo.style.background = "#fdedec";
-                    wifiInfo.style.color = "#e74c3c";
-                }
-            });
-        }
-
-        window.onload = () => {
-            let initialDays = [];
-            let currentDays = "${schedule.days}";
-            for(let i=0; i<7; i++) if(currentDays[i] === '1') initialDays.push(dayNames[i]);
-            updateSchedUI("${schedule.on}", "${schedule.off}", initialDays);
-            setInterval(updateStatus, 3000);
-            updateStatus();
-        };
+        renderDevices();
     </script>
 </body>
 </html>
     `);
 });
 
-// API cho ESP01s Ping
-app.get('/ping', (req, res) => {
-    if(req.query.wifi) {
-        wifiName = req.query.wifi;
-        lastPing = Date.now();
-    }
+// Các API xử lý lưu mảng Schedule (Bạn cần hoàn thiện logic lưu mảng này trên Render)
+app.get('/add-sched', (req, res) => {
+    const { id, on, off, days } = req.query;
+    devices[id].schedules.push({ on, off, days });
     res.send("OK");
 });
 
-app.get('/status', (req, res) => {
-    // Tăng thời gian kiểm tra Online lên 45 giây để tránh báo Offline nhầm khi mạng lag
-    res.json({
-        state: relayState,
-        wifi: wifiName,
-        online: (Date.now() - lastPing) < 45000, 
-        sched: schedule
-    });
+app.get('/del-sched', (req, res) => {
+    const { id, idx } = req.query;
+    devices[id].schedules.splice(idx, 1);
+    res.send("OK");
 });
-
-app.get('/set-schedule', (req, res) => {
-    schedule.on = req.query.on;
-    schedule.off = req.query.off;
-    schedule.days = req.query.days;
-    schedule.version++;
-    res.json(schedule);
-});
-
-app.get('/relay', (req, res) => { relayState = req.query.state; res.send("OK"); });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log('Server running...'));
