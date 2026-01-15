@@ -2,6 +2,14 @@ const express = require('express');
 const fetch = require('node-fetch');
 const app = express();
 
+// Thêm biến lưu lịch trình trên Server
+let schedule = {
+    timeOn: "00:00",
+    timeOff: "00:00",
+    days: "0000000", // T2 T3 T4 T5 T6 T7 CN
+    active: false
+};
+
 let relayState = "OFF";
 let wifiName = "UNKNOWN";
 let lastPing = 0;
@@ -33,6 +41,40 @@ app.get('/', (req, res) => {
     </style>
 </head>
 <body>
+<div class="card">
+    <h4>Lập lịch định kỳ</h4>
+    <input type="time" id="tOn"> đến <input type="time" id="tOff">
+    <div id="daySelector" style="margin: 10px 0;">
+        <button onclick="toggleAll()">All</button><br>
+        <input type="checkbox" class="day" value="0"> T2
+        <input type="checkbox" class="day" value="1"> T3
+        <input type="checkbox" class="day" value="2"> T4
+        <input type="checkbox" class="day" value="3"> T5
+        <input type="checkbox" class="day" value="4"> T6
+        <input type="checkbox" class="day" value="5"> T7
+        <input type="checkbox" class="day" value="6"> CN
+    </div>
+    <button class="btn on" onclick="saveSchedule()">LƯU LỊCH</button>
+</div>
+
+<script>
+function toggleAll() {
+    let checks = document.querySelectorAll('.day');
+    let allSelected = Array.from(checks).every(c => c.checked);
+    checks.forEach(c => c.checked = !allSelected);
+}
+
+function saveSchedule() {
+    let days = "";
+    document.querySelectorAll('.day').forEach(c => days += c.checked ? "1" : "0");
+    let tOn = document.getElementById('tOn').value;
+    let tOff = document.getElementById('tOff').value;
+    fetch(`/set-schedule?on=${tOn}&off=${tOff}&days=${days}`);
+}
+</script>
+
+// Trong phần HTML (res.send), thêm giao diện:
+/*
     <div class="card">
         <h2>IOT ESP01s</h2>
         <div class="status" id="wifi">WiFi: --</div>
@@ -47,7 +89,7 @@ app.get('/', (req, res) => {
         <button class="btn timer-btn" onclick="setTimer(10)">10 Phút</button>
         <button class="btn timer-btn" onclick="setTimer(30)">30 Phút</button>
     </div>
-
+*/
     <script>
         function ctrl(s) { fetch('/relay?state=' + s); }
         function setTimer(m) { fetch('/set-timer?min=' + m); }
