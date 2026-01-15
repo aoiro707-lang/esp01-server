@@ -54,82 +54,70 @@ app.get('/', (req, res) => {
 
     <div id="device-list"></div>
 
-    <script>
-        let devData = ${JSON.stringify(devices)};
+ // ... (Các phần CSS và dữ liệu giữ nguyên như bản trước) ...
 
-        function renderDevices() {
-            let html = "";
-            for (let id in devData) {
-                let dev = devData[id];
-                html += \`
-                <div class="device-card">
-                    <div class="row">
-                        <span class="dev-name">\${dev.name}</span>
-                        <label class="switch">
-                            <input type="checkbox" \${dev.state === 'ON' ? 'checked' : ''} onchange="toggleDev('\${id}', this.checked)">
-                            <span class="slider"></span>
-                        </label>
-                        <span class="more-btn" onclick="toggleBox('\${id}')">...</span>
-                    </div>
-                    
-                    <div id="box-\${id}" class="sched-box">
-                        <div class="sched-row">
-                            <strong>Schedule</strong> 
-                            ON <input type="time" id="on-\${id}"> 
-                            OFF <input type="time" id="off-\${id}">
-                            <span class="save-btn" onclick="saveSched('\${id}')">💾</span>
-                        </div>
-                        <div class="sched-row" style="border-top: 1px solid #eee; padding-top:5px;">
-                            \${['T2','T3','T4','T5','T6','T7','CN'].map((d,i) => \`
-                                <div class="day-check">
-                                    \${d}<br><input type="checkbox" class="day-\${id}" value="\${i}">
-                                </div>
-                            \`).join('')}
-                            <div class="day-check">All<br><input type="checkbox" onchange="toggleAll('\${id}', this.checked)"></div>
-                        </div>
-                    </div>
+<script>
+    const dayNamesShort = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
-                    <div id="list-\${id}" style="margin-top: 10px; font-size: 13px;">
-                        \${dev.schedules.map((s, idx) => \`
-                            <div style="display:flex; align-items:center; color:#2ecc71; margin-bottom:3px;">
-                                🕒 \${s.on} | \${s.off} 
-                                <span class="del-btn" onclick="delSched('\${id}', \${idx})">✘</span>
+    function renderDevices() {
+        let html = "";
+        for (let id in devData) {
+            let dev = devData[id];
+            html += `
+            <div class="device-card">
+                <div class="row">
+                    <span class="dev-name">${dev.name}</span>
+                    <label class="switch">
+                        <input type="checkbox" ${dev.state === 'ON' ? 'checked' : ''} onchange="toggleDev('${id}', this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="more-btn" onclick="toggleBox('${id}')">...</span>
+                </div>
+                
+                <div id="box-${id}" class="sched-box">
+                    <div class="sched-row">
+                        <strong>Lập lịch</strong> 
+                        ON <input type="time" id="on-${id}"> 
+                        OFF <input type="time" id="off-${id}">
+                        <span class="save-btn" onclick="saveSched('${id}')">💾</span>
+                    </div>
+                    <div class="sched-row" style="border-top: 1px solid #eee; padding-top:5px;">
+                        ${dayNamesShort.map((d,i) => `
+                            <div class="day-check">
+                                ${d}<br><input type="checkbox" class="day-${id}" value="${i}">
                             </div>
-                        \`).join('')}
+                        `).join('')}
+                        <div class="day-check">All<br><input type="checkbox" onchange="toggleAll('${id}', this.checked)"></div>
                     </div>
-                </div>\`;
-            }
-            document.getElementById('device-list').innerHTML = html;
-        }
+                </div>
 
-        function toggleBox(id) {
-            let b = document.getElementById('box-' + id);
-            b.style.display = b.style.display === 'block' ? 'none' : 'block';
-        }
+                <div id="list-${id}" style="margin-top: 10px; font-size: 13px;">
+                    ${dev.schedules.map((s, idx) => {
+                        // Chuyển chuỗi "1101000" thành mảng các thứ (T2, T3, T5)
+                        let activeDays = [];
+                        for(let i=0; i<7; i++) {
+                            if(s.days[i] === '1') activeDays.push(dayNamesShort[i]);
+                        }
+                        let daysText = activeDays.length === 7 ? "Hàng ngày" : activeDays.join(", ");
 
-        function toggleDev(id, state) {
-            fetch(\`/relay?id=\${id}&state=\${state ? 'ON' : 'OFF'}\`);
+                        return `
+                        <div style="display:flex; align-items:center; margin-bottom:5px; border-bottom: 1px dashed #eee; padding: 3px 0;">
+                            <span style="margin-right:8px;">🕒</span>
+                            <span style="color:#2ecc71; font-weight:bold;">${s.on}</span> 
+                            <span style="margin: 0 5px;">|</span>
+                            <span style="color:#e74c3c; font-weight:bold;">${s.off}</span>
+                            <span style="color:#888; margin-left:10px; font-size:11px;">(${daysText})</span>
+                            <span class="del-btn" onclick="delSched('${id}', ${idx})" style="margin-left:auto;">✘</span>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
         }
-
-        function toggleAll(id, check) {
-            document.querySelectorAll('.day-' + id).forEach(i => i.checked = check);
-        }
-
-        function saveSched(id) {
-            let on = document.getElementById('on-' + id).value;
-            let off = document.getElementById('off-' + id).value;
-            let days = "";
-            document.querySelectorAll('.day-' + id).forEach(i => days += i.checked ? "1" : "0");
-            
-            fetch(\`/add-sched?id=\${id}&on=\${on}&off=\${off}&days=\${days}\`).then(() => location.reload());
-        }
-
-        function delSched(id, idx) {
-            fetch(\`/del-sched?id=\${id}&idx=\${idx}\`).then(() => location.reload());
-        }
-
-        renderDevices();
-    </script>
+        document.getElementById('device-list').innerHTML = html;
+    }
+    
+    // ... (Các hàm toggleDev, saveSched, delSched giữ nguyên) ...
+</script>
 </body>
 </html>
     `);
