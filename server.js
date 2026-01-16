@@ -1,12 +1,14 @@
-// ... (Các phần khai báo đầu giữ nguyên)
+// Thêm vào đầu file hoặc trong object devices để theo dõi thời gian bấm nút
+// let devices = {}; 
 
-// Thêm timestamp để theo dõi lần cuối người dùng bấm nút
 app.get('/relay', (req, res) => { 
-    if(devices[req.query.id]) {
-        devices[req.query.id].state = req.query.state; 
-        // Đánh dấu thời gian người dùng vừa can thiệp
-        devices[req.query.id].lastUserUpdate = Date.now(); 
+    const { id, state } = req.query;
+    if(devices[id]) {
+        devices[id].state = state; 
+        // QUAN TRỌNG: Lưu lại thời điểm người dùng nhấn nút
+        devices[id].lastUserAction = Date.now(); 
         saveData();
+        console.log(`[User] Device ${id} set to ${state}`);
     }
     res.send("OK"); 
 });
@@ -15,45 +17,36 @@ app.get('/ping', (req, res) => {
     const { id, wifi, name, state: espPhysState } = req.query;
     if (!id) return res.send("No ID");
     
-    let isNew = false;
     if (!devices[id]) {
-        devices[id] = { name: name || "Relay", state: "OFF", schedules: [], wifi: wifi || "Unknown" };
-        isNew = true;
+        devices[id] = { name: name || "Relay", state: "OFF", schedules: [], wifi: wifi || "Unknown", lastUserAction: 0 };
     }
     
     devices[id].wifi = wifi;
     devices[id].lastPing = Date.now();
-    if (isNew) saveData();
 
-    // --- LOGIC THÔNG MINH MỚI ---
     const webState = devices[id].state;
-    const lastUserAction = devices[id].lastUserUpdate || 0;
-    const timeSinceLastClick = Date.now() - lastUserAction;
+    const lastAction = devices[id].lastUserAction || 0;
+    const timeSinceClick = Date.now() - lastAction;
 
-    // Chỉ thực hiện so sánh nếu ESP gửi lên trạng thái thực tế
+    // LOGIC ĐỐI SOÁT MỚI:
     if (espPhysState) {
-        // TRƯỜNG HỢP 1: Người dùng vừa bấm nút trong vòng 15 giây qua
-        // -> Ưu tiên lệnh từ Web (Server là chủ)
-        if (timeSinceLastClick < 15000) {
-             if (webState !== espPhysState) {
-                 console.log(`[SYNC] User Clicked! Forcing ESP: ${webState}`);
-                 return res.send(webState === "ON" ? "TURN_ON" : "TURN_OFF");
-             }
+        // Nếu người dùng vừa bấm nút (trong 10 giây qua) -> Ép ESP theo Web
+        if (timeSinceClick < 10000) { 
+            if (webState !== espPhysState) {
+                console.log(`[Sync] User Override -> Send ${webState} to ESP`);
+                return res.send(webState === "ON" ? "TURN_ON" : "TURN_OFF");
+            }
         } 
-        // TRƯỜNG HỢP 2: Người dùng KHÔNG bấm gì cả (Idle)
-        // -> Ưu tiên trạng thái của ESP (Lịch trình là chủ)
+        // Nếu người dùng KHÔNG bấm gì -> Server phải đi theo ESP (Ưu tiên Lịch trình/Nút cứng)
         else {
-             if (webState !== espPhysState) {
-                 console.log(`[SYNC] Schedule/Manual detected. Updating Web to: ${espPhysState}`);
-                 // Cập nhật Database theo thực tế ESP
-                 devices[id].state = espPhysState; 
-                 saveData();
-                 // Không gửi lệnh gì cả, để ESP tự nhiên
-             }
+            if (webState !== espPhysState) {
+                console.log(`[Sync] ESP Changed (Schedule/Manual) -> Update Web to ${espPhysState}`);
+                devices[id].state = espPhysState; 
+                saveData();
+                // Không gửi lệnh bắt ESP thay đổi nữa
+            }
         }
     }
 
     res.send("OK");
 });
-
-// ... (Các phần còn lại giữ nguyên)
