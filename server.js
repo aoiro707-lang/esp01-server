@@ -216,3 +216,12 @@ app.get('/', (req, res) => {
 app.listen(10000, () => {
     console.log("Server đang chạy tại port 10000...");
 });
+
+
+// Tự gọi chính mình mỗi 10 phút để chống sleep (Render Free Tier)
+const axios = require('axios'); // Hoặc dùng node-fetch nếu bạn đã cài
+setInterval(() => {
+    axios.get('https://esp01-server-1.onrender.com/all-data') // Thay bằng link thật của bạn
+        .then(() => console.log("Self-ping: Đã tự đánh thức server thành công"))
+        .catch(err => console.log("Self-ping error: ", err.message));
+}, 600000); // 600,000ms = 10 phút
