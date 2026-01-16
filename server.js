@@ -1,111 +1,145 @@
 const express = require('express');
+const cors = require('cors');
 const app = express();
 
-let devices = {}; // Lưu trữ: { "MACID": { name, state, wifi, lastPing, schedules: [] } }
+app.use(cors());
+app.use(express.json());
 
+let devices = {}; 
+
+// --- API ---
+app.get('/ping', (req, res) => {
+    const { id, wifi, name } = req.query;
+    if (!id) return res.send("No ID");
+    if (!devices[id]) devices[id] = { name: name || "Relay", state: "OFF", schedules: [], wifi: wifi || "Unknown" };
+    devices[id].wifi = wifi;
+    devices[id].lastPing = Date.now();
+    res.send("OK");
+});
+
+app.get('/all-data', (req, res) => res.json(devices));
+app.get('/status', (req, res) => res.json(devices[req.query.id] || {}));
+app.get('/relay', (req, res) => { if(devices[req.query.id]) devices[req.query.id].state = req.query.state; res.send("OK"); });
+app.get('/add-sched', (req, res) => { if(devices[req.query.id]) devices[req.query.id].schedules.push({on:req.query.on, off:req.query.off, days:req.query.days}); res.send("OK"); });
+app.get('/del-sched', (req, res) => { if(devices[req.query.id]) devices[req.query.id].schedules.splice(req.query.idx, 1); res.send("OK"); });
+app.get('/rename', (req, res) => { if(devices[req.query.id]) devices[req.query.id].name = req.query.name; res.send("OK"); });
+
+// --- GIAO DIỆN ---
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ESP Group Manager</title>
+    <title>ESP Control</title>
     <style>
         body { font-family: sans-serif; background: #f4f7f6; padding: 20px; }
-        .wifi-group { background: white; border-radius: 10px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .wifi-header { color: #2ecc71; font-weight: bold; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-bottom: 10px; }
-        .device-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #f9f9f9; }
-        .dev-name { flex-grow: 1; cursor: pointer; font-weight: bold; text-decoration: underline; color: #34495e; }
-        .switch { position: relative; width: 50px; height: 24px; }
-        .switch input { opacity: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; border-radius: 24px; transition: .4s; }
-        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background: white; border-radius: 50%; transition: .4s; }
-        input:checked + .slider { background: #2ecc71; }
-        input:checked + .slider:before { transform: translateX(26px); }
-        .sched-box { border-left: 3px solid #3498db; padding-left: 10px; margin: 10px 0; display: none; font-size: 13px; }
+        .card { background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .flex { display: flex; justify-content: space-between; align-items: center; }
+        .btn-toggle { padding: 8px 15px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; min-width: 60px; }
+        .ON { background: #2ecc71; color: white; }
+        .OFF { background: #e74c3c; color: white; }
+        .input-area { margin-top: 15px; padding: 10px; background: #f0f4f8; border-radius: 8px; border: 1px solid #dce4ec; }
+        .sched-display { margin-top: 10px; }
+        .sched-item { display: flex; justify-content: space-between; padding: 5px 8px; background: #fff; border: 1px solid #eee; border-radius: 5px; margin-top: 4px; font-size: 13px; color: #555; }
+        input[type="time"] { border: 1px solid #ccc; border-radius: 4px; padding: 3px; }
+        .save-btn { background: #3498db; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; margin-left: 5px; }
     </style>
 </head>
 <body>
-    <h2>IoT ESP01s Control System</h2>
-    <div id="container"></div>
+    <h3 style="text-align:center; color:#2c3e50;">ESP01s Control System</h3>
+    <div id="list">Đang tải...</div>
 
     <script>
-        let data = ${JSON.stringify(devices)};
+        let devices = {};
+        let openInputId = null; // Chỉ ID này mới hiện ô nhập liệu
+
+        async function load() {
+            if (openInputId !== null) return; 
+            try {
+                const r = await fetch('/all-data');
+                devices = await r.json();
+                render();
+            } catch(e) {}
+        }
 
         function render() {
-            const groups = {};
-            // Group theo WiFi
-            for (let id in data) {
-                const wifi = data[id].wifi || "Unknown";
-                if (!groups[wifi]) groups[wifi] = [];
-                groups[wifi].push({id, ...data[id]});
-            }
-
-            let html = "";
-            for (let wifi in groups) {
-                html += \`<div class="wifi-group">
-                    <div class="wifi-header">● Wifi: \${wifi} Connected</div>\`;
-                groups[wifi].forEach(dev => {
-                    html += \`<div class="device-row">
-                        <span class="dev-name" onclick="rename('\${dev.id}', '\${dev.name}')">\${dev.name}</span>
-                        <label class="switch">
-                            <input type="checkbox" \${dev.state==='ON'?'checked':''} onchange="toggle('\${dev.id}', this.checked)">
-                            <span class="slider"></span>
-                        </label>
-                        <span style="margin-left:15px; cursor:pointer;" onclick="showSched('\${dev.id}')">...</span>
-                    </div>
-                    <div id="box-\${dev.id}" class="sched-box">
-                        <input type="time" id="on-\${dev.id}"> to <input type="time" id="off-\${dev.id}">
-                        <button onclick="addSched('\${dev.id}')">Save 💾</button>
-                        <div id="list-\${dev.id}">\${dev.schedules.map((s,i)=>\`<div>\${s.on}-\${s.off} <button onclick="delSched('\${dev.id}',\${i})">x</button></div>\`).join('')}</div>
-                    </div>\`;
+            const container = document.getElementById('list');
+            const ids = Object.keys(devices);
+            if(ids.length === 0) { container.innerHTML = "Trống"; return; }
+            
+            let h = "";
+            ids.forEach(id => {
+                const d = devices[id];
+                h += '<div class="card">';
+                
+                // Tiêu đề và Nút điều khiển
+                h += '<div class="flex"><div><b style="color:#2980b9; cursor:pointer;" onclick="rename(\\''+id+'\\',\\''+d.name+'\\')">' + d.name + '</b><br><small>WiFi: ' + d.wifi + '</small></div>';
+                h += '<div><button class="btn-toggle '+d.state+'" onclick="toggle(\\''+id+'\\',\\''+(d.state==='ON'?'OFF':'ON')+'\\')">' + d.state + '</button>';
+                h += '<span onclick="toggleInput(\\''+id+'\\')" style="cursor:pointer; margin-left:15px; font-weight:bold; color:#95a5a6;">...</span></div></div>';
+                
+                // PHẦN 1: Danh sách giờ đã set (LUÔN HIỆN)
+                h += '<div class="sched-display">';
+                (d.schedules || []).forEach((s, i) => {
+                    h += '<div class="sched-item"><span>🕒 ' + s.on + ' - ' + s.off + '</span>';
+                    h += '<b onclick="del(\\''+id+'\\','+i+')" style="color:#e74c3c; cursor:pointer">✕</b></div>';
                 });
-                html += "</div>";
+                h += '</div>';
+
+                // PHẦN 2: Ô nhập liệu (CHỈ HIỆN KHI BẤM "...")
+                if(openInputId === id) {
+                    h += '<div class="input-area">';
+                    h += '<input type="time" id="t1-'+id+'"> - <input type="time" id="t2-'+id+'"> ';
+                    h += '<button class="save-btn" onclick="add(\\''+id+'\\')">Lưu</button></div>';
+                }
+
+                h += '</div>';
+            });
+            container.innerHTML = h;
+        }
+
+        function toggleInput(id) { 
+            openInputId = (openInputId === id) ? null : id; 
+            render(); 
+        }
+
+        async function toggle(id, st) {
+            await fetch('/relay?id='+id+'&state='+st);
+            loadImmediate();
+        }
+
+        async function add(id) {
+            let t1 = document.getElementById('t1-'+id).value;
+            let t2 = document.getElementById('t2-'+id).value;
+            if(t1 && t2) {
+                await fetch('/add-sched?id='+id+'&on='+t1+'&off='+t2+'&days=1111111');
+                openInputId = null;
+                loadImmediate();
             }
-            document.getElementById('container').innerHTML = html;
         }
 
-        function rename(id, oldName) {
-            let newName = prompt("Nhập tên mới cho thiết bị:", oldName);
-            if (newName) fetch(\`/rename?id=\${id}&name=\${newName}\`).then(()=>location.reload());
+        async function del(id, i) {
+            await fetch('/del-sched?id='+id+'&idx='+i);
+            loadImmediate();
         }
 
-        function toggle(id, s) { fetch(\`/relay?id=\${id}&state=\${s?'ON':'OFF'}\`); }
-        function showSched(id) { 
-            let el = document.getElementById('box-'+id);
-            el.style.display = el.style.display === 'block' ? 'none' : 'block';
-        }
-        function addSched(id) {
-            let on = document.getElementById('on-'+id).value;
-            let off = document.getElementById('off-'+id).value;
-            fetch(\`/add-sched?id=\${id}&on=\${on}&off=\${off}&days=1111111\`).then(()=>location.reload());
-        }
-        function delSched(id, idx) {
-            fetch(\`/del-sched?id=\${id}&idx=\${idx}\`).then(()=>location.reload());
+        function rename(id, old) {
+            let n = prompt("Tên mới:", old);
+            if(n) fetch('/rename?id='+id+'&name='+encodeURIComponent(n)).then(loadImmediate);
         }
 
-        render();
-        setInterval(() => fetch('/all-data').then(r=>r.json()).then(d=>{data=d;render();}), 5000);
+        async function loadImmediate() {
+            const r = await fetch('/all-data');
+            devices = await r.json();
+            render();
+        }
+
+        setInterval(load, 5000);
+        load();
     </script>
 </body>
 </html>
     `);
 });
-
-// APIs
-app.get('/ping', (req, res) => {
-    const { id, wifi, name } = req.query;
-    if (!devices[id]) devices[id] = { name: name || "Relay", schedules: [], state: "OFF" };
-    devices[id].wifi = wifi;
-    devices[id].lastPing = Date.now();
-    res.send("OK");
-});
-
-app.get('/status', (req, res) => { res.json(devices[req.query.id] || {}); });
-app.get('/rename', (req, res) => { devices[req.query.id].name = req.query.name; res.send("OK"); });
-app.get('/all-data', (req, res) => { res.json(devices); });
-app.get('/relay', (req, res) => { devices[req.query.id].state = req.query.state; res.send("OK"); });
-app.get('/add-sched', (req, res) => { devices[req.query.id].schedules.push({on:req.query.on, off:req.query.off, days:req.query.days}); res.send("OK"); });
-app.get('/del-sched', (req, res) => { devices[req.query.id].schedules.splice(req.query.idx, 1); res.send("OK"); });
 
 app.listen(10000);
