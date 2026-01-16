@@ -7,7 +7,7 @@ app.use(express.json());
 
 let devices = {}; 
 
-// --- CÁC ĐƯỜNG DẪN API ---
+// --- API ---
 app.get('/ping', (req, res) => {
     const { id, wifi, name } = req.query;
     if (!id) return res.send("No ID");
@@ -36,37 +36,43 @@ app.get('/rename', (req, res) => {
     res.send("OK"); 
 });
 
-// --- GIAO DIỆN WEB (SỬ DỤNG TEMPLATE AN TOÀN) ---
+// --- GIAO DIỆN ---
 app.get('/', (req, res) => {
-    const html = `
+    res.send(`
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ESP Manager</title>
+    <title>ESP Control</title>
     <style>
-        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; }
-        .card { background: white; padding: 15px; border-radius: 10px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        body { font-family: sans-serif; background: #f4f7f6; padding: 20px; }
+        .card { background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .flex { display: flex; justify-content: space-between; align-items: center; }
-        .btn { padding: 8px 15px; border-radius: 5px; border: none; cursor: pointer; font-weight: bold; }
-        .btn-ON { background: #2ecc71; color: white; }
-        .btn-OFF { background: #95a5a6; color: white; }
+        .btn-toggle { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; min-width: 70px; }
+        .ON { background: #2ecc71; color: white; }
+        .OFF { background: #e74c3c; color: white; }
+        .sched-box { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
+        input[type="time"] { padding: 5px; border-radius: 4px; border: 1px solid #ddd; }
+        .save-btn { background: #3498db; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
     </style>
 </head>
 <body>
-    <h3>IoT ESP01s Dashboard</h3>
-    <div id="list">Đang tải...</div>
+    <h2 style="text-align:center; color:#2c3e50;">IoT ESP01s Control System</h2>
+    <div id="list">Đang tải thiết bị...</div>
 
     <script>
         let devices = {};
         let openId = null;
 
         async function load() {
+            // Nếu đang mở bảng hẹn giờ (openId !== null), tạm dừng cập nhật để không mất dữ liệu đang nhập
+            if (openId !== null) return; 
+            
             try {
                 const r = await fetch('/all-data');
                 devices = await r.json();
                 render();
-            } catch(e) { console.error(e); }
+            } catch(e) { console.error("Lỗi kết nối server"); }
         }
 
         function render() {
@@ -78,41 +84,73 @@ app.get('/', (req, res) => {
             ids.forEach(id => {
                 const d = devices[id];
                 h += '<div class="card">';
-                h += '<div class="flex"><div><b onclick="rename(\\''+id+'\\',\\''+d.name+'\\')" style="color:blue;cursor:pointer">' + d.name + '</b><br><small>' + d.wifi + '</small></div>';
-                h += '<div><button class="btn btn-'+d.state+'" onclick="toggle(\\''+id+'\\',\\''+(d.state==='ON'?'OFF':'ON')+'\\')">' + d.state + '</button>';
-                h += '<span onclick="show(\\''+id+'\\')" style="cursor:pointer;margin-left:10px">...</span></div></div>';
+                h += '<div class="flex"><div><b style="color:#3498db; cursor:pointer;" onclick="rename(\\''+id+'\\',\\''+d.name+'\\')">' + d.name + '</b><br><small>WiFi: ' + d.wifi + '</small></div>';
+                h += '<div><button class="btn-toggle '+d.state+'" onclick="toggle(\\''+id+'\\',\\''+(d.state==='ON'?'OFF':'ON')+'\\')">' + d.state + '</button>';
+                h += '<span onclick="show(\\''+id+'\\')" style="cursor:pointer; margin-left:15px; font-size:20px;">...</span></div></div>';
                 
                 if(openId === id) {
-                    h += '<div style="margin-top:10px;border-top:1px solid #eee;padding-top:10px">';
-                    h += '<input type="time" id="t1-'+id+'"> - <input type="time" id="t2-'+id+'"> <button onclick="add(\\''+id+'\\')">Lưu</button>';
+                    h += '<div class="sched-box">';
+                    h += '<input type="time" id="t1-'+id+'"> - <input type="time" id="t2-'+id+'"> ';
+                    h += '<button class="save-btn" onclick="add(\\''+id+'\\')">Lưu 💾</button>';
+                    h += '<div style="margin-top:10px">';
                     (d.schedules || []).forEach((s, i) => {
-                        h += '<div style="font-size:12px;display:flex;justify-content:space-between;margin-top:5px;background:#f9f9f9;padding:5px"><span>🕒 '+s.on+' - '+s.off+'</span><b onclick="del(\\''+id+'\\','+i+')" style="color:red;cursor:pointer">X</b></div>';
+                        h += '<div style="display:flex; justify-content:space-between; padding:8px; background:#f9f9f9; border-radius:5px; margin-bottom:5px; font-size:14px;">';
+                        h += '<span>🕒 ' + s.on + ' - ' + s.off + '</span>';
+                        h += '<b onclick="del(\\''+id+'\\','+i+')" style="color:#e74c3c; cursor:pointer">✕</b></div>';
                     });
-                    h += '</div>';
+                    h += '</div></div>';
                 }
                 h += '</div>';
             });
             container.innerHTML = h;
         }
 
-        function show(id) { openId = (openId === id) ? null : id; render(); }
-        function toggle(id, st) { fetch('/relay?id='+id+'&state='+st).then(load); }
-        function rename(id, old) { let n = prompt("Tên mới:", old); if(n) fetch('/rename?id='+id+'&name='+encodeURIComponent(n)).then(load); }
-        function add(id) {
-            let t1 = document.getElementById('t1-'+id).value, t2 = document.getElementById('t2-'+id).value;
-            if(t1 && t2) fetch('/add-sched?id='+id+'&on='+t1+'&off='+t2+'&days=1111111').then(load);
+        function show(id) { 
+            openId = (openId === id) ? null : id; 
+            render(); 
         }
-        function del(id, i) { fetch('/del-sched?id='+id+'&idx='+i).then(load); }
 
-        setInterval(load, 5000);
+        async function toggle(id, st) { 
+            await fetch('/relay?id='+id+'&state='+st);
+            // Sau khi điều khiển tay, cập nhật lại trạng thái ngay lập tức
+            const r = await fetch('/all-data');
+            devices = await r.json();
+            render();
+        }
+
+        function rename(id, old) { 
+            let n = prompt("Tên thiết bị mới:", old); 
+            if(n) fetch('/rename?id='+id+'&name='+encodeURIComponent(n)).then(() => { openId = null; load(); }); 
+        }
+
+        async function add(id) {
+            let t1 = document.getElementById('t1-'+id).value;
+            let t2 = document.getElementById('t2-'+id).value;
+            if(t1 && t2) {
+                await fetch('/add-sched?id='+id+'&on='+t1+'&off='+t2+'&days=1111111');
+                alert("Đã lưu lịch trình!");
+                openId = null; // Đóng bảng sau khi lưu để cho phép auto-refresh trở lại
+                const r = await fetch('/all-data');
+                devices = await r.json();
+                render();
+            } else {
+                alert("Vui lòng chọn đủ giờ Bật và Tắt!");
+            }
+        }
+
+        async function del(id, i) { 
+            await fetch('/del-sched?id='+id+'&idx='+i);
+            const r = await fetch('/all-data');
+            devices = await r.json();
+            render();
+        }
+
+        setInterval(load, 5000); // Tự động cập nhật mỗi 5 giây
         load();
     </script>
 </body>
-</html>`;
-    res.send(html);
+</html>
+    `);
 });
 
-// Chạy server tại cổng 10000
-app.listen(10000, () => {
-    console.log("Server is running on port 10000");
-});
+app.listen(10000);
