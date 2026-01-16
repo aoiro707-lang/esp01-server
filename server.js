@@ -1,30 +1,113 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const https = require('https'); // Thêm thư viện https để tự ping
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+const DATA_FILE = path.join(__dirname, 'devices_data.json');
 let devices = {}; 
 
-// --- API ---
+// --- 1. TỰ ĐỘNG NGĂN SERVER SLEEP (ANTI-SLEEP) ---
+// Thay URL bằng link Render của bạn để server tự thức giấc
+const SERVER_URL = "https://esp01-server-1.onrender.com"; 
+
+setInterval(() => {
+    https.get(SERVER_URL, (res) => {
+        console.log("[Keep-Alive] Tự gọi chính mình để giữ Server thức.");
+    }).on('error', (e) => {
+        console.error("[Keep-Alive] Lỗi tự ping: " + e.message);
+    });
+}, 600000); // Mỗi 10 phút (600,000ms)
+
+// --- 2. HÀM HỖ TRỢ ĐỌC/GHI FILE ---
+const loadData = () => {
+    try {
+        if (fs.existsSync(DATA_FILE)) {
+            const data = fs.readFileSync(DATA_FILE, 'utf8');
+            devices = JSON.parse(data);
+            console.log("Dữ liệu đã được khôi phục từ file.");
+        }
+    } catch (err) {
+        devices = {};
+    }
+};
+
+const saveData = () => {
+    try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(devices, null, 2), 'utf8');
+    } catch (err) {
+        console.error("Lỗi khi ghi file dữ liệu:", err);
+    }
+};
+
+loadData();
+
+// --- 3. API VỚI LOGIC ĐỐI SOÁT TRẠNG THÁI ---
 app.get('/ping', (req, res) => {
-    const { id, wifi, name } = req.query;
+    const { id, wifi, name, state: espState } = req.query;
     if (!id) return res.send("No ID");
-    if (!devices[id]) devices[id] = { name: name || "Relay", state: "OFF", schedules: [], wifi: wifi || "Unknown" };
+    
+    let isNew = false;
+    if (!devices[id]) {
+        devices[id] = { name: name || "Relay", state: "OFF", schedules: [], wifi: wifi || "Unknown" };
+        isNew = true;
+    }
+    
     devices[id].wifi = wifi;
     devices[id].lastPing = Date.now();
+    if (isNew) saveData();
+
+    // Quét trạng thái UX vs Thực tế ESP
+    const serverState = devices[id].state;
+    if (espState && serverState !== espState) {
+        console.log(`[Sync] ID ${id}: Lệnh cưỡng bách -> ${serverState}`);
+        return res.send(serverState === "ON" ? "TURN_ON" : "TURN_OFF");
+    }
+
     res.send("OK");
 });
 
 app.get('/all-data', (req, res) => res.json(devices));
-app.get('/status', (req, res) => res.json(devices[req.query.id] || {}));
-app.get('/relay', (req, res) => { if(devices[req.query.id]) devices[req.query.id].state = req.query.state; res.send("OK"); });
-app.get('/add-sched', (req, res) => { if(devices[req.query.id]) devices[req.query.id].schedules.push({on:req.query.on, off:req.query.off, days:req.query.days}); res.send("OK"); });
-app.get('/del-sched', (req, res) => { if(devices[req.query.id]) devices[req.query.id].schedules.splice(req.query.idx, 1); res.send("OK"); });
-app.get('/rename', (req, res) => { if(devices[req.query.id]) devices[req.query.id].name = req.query.name; res.send("OK"); });
 
-// --- GIAO DIỆN ---
+app.get('/status', (req, res) => res.json(devices[req.query.id] || {}));
+
+app.get('/relay', (req, res) => { 
+    if(devices[req.query.id]) {
+        devices[req.query.id].state = req.query.state; 
+        saveData();
+    }
+    res.send("OK"); 
+});
+
+app.get('/add-sched', (req, res) => { 
+    if(devices[req.query.id]) {
+        devices[req.query.id].schedules.push({on:req.query.on, off:req.query.off, days:req.query.days}); 
+        saveData();
+    }
+    res.send("OK"); 
+});
+
+app.get('/del-sched', (req, res) => { 
+    if(devices[req.query.id]) {
+        devices[req.query.id].schedules.splice(req.query.idx, 1); 
+        saveData();
+    }
+    res.send("OK"); 
+});
+
+app.get('/rename', (req, res) => { 
+    if(devices[req.query.id]) {
+        devices[req.query.id].name = req.query.name; 
+        saveData();
+    }
+    res.send("OK"); 
+});
+
+// --- 4. GIAO DIỆN (Giữ nguyên UX của bạn) ---
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -49,10 +132,9 @@ app.get('/', (req, res) => {
 <body>
     <h3 style="text-align:center; color:#2c3e50;">ESP01s Control System</h3>
     <div id="list">Đang tải...</div>
-
     <script>
         let devices = {};
-        let openInputId = null; // Chỉ ID này mới hiện ô nhập liệu
+        let openInputId = null; 
 
         async function load() {
             if (openInputId !== null) return; 
@@ -67,73 +149,31 @@ app.get('/', (req, res) => {
             const container = document.getElementById('list');
             const ids = Object.keys(devices);
             if(ids.length === 0) { container.innerHTML = "Trống"; return; }
-            
             let h = "";
             ids.forEach(id => {
                 const d = devices[id];
-                h += '<div class="card">';
-                
-                // Tiêu đề và Nút điều khiển
-                h += '<div class="flex"><div><b style="color:#2980b9; cursor:pointer;" onclick="rename(\\''+id+'\\',\\''+d.name+'\\')">' + d.name + '</b><br><small>WiFi: ' + d.wifi + '</small></div>';
-                h += '<div><button class="btn-toggle '+d.state+'" onclick="toggle(\\''+id+'\\',\\''+(d.state==='ON'?'OFF':'ON')+'\\')">' + d.state + '</button>';
-                h += '<span onclick="toggleInput(\\''+id+'\\')" style="cursor:pointer; margin-left:15px; font-weight:bold; color:#95a5a6;">...</span></div></div>';
-                
-                // PHẦN 1: Danh sách giờ đã set (LUÔN HIỆN)
-                h += '<div class="sched-display">';
+                h += '<div class="card"><div class="flex"><div><b style="color:#2980b9; cursor:pointer" onclick="rename(\\''+id+'\\',\\''+d.name+'\\')">'+d.name+'</b><br><small>WiFi: '+d.wifi+'</small></div><div><button class="btn-toggle '+d.state+'" onclick="toggle(\\''+id+'\\',\\''+(d.state==='ON'?'OFF':'ON')+'\\')">'+d.state+'</button><span onclick="toggleInput(\\''+id+'\\')" style="cursor:pointer; margin-left:15px; font-weight:bold; color:#95a5a6;">...</span></div></div><div class="sched-display">';
                 (d.schedules || []).forEach((s, i) => {
-                    h += '<div class="sched-item"><span>🕒 ' + s.on + ' - ' + s.off + '</span>';
-                    h += '<b onclick="del(\\''+id+'\\','+i+')" style="color:#e74c3c; cursor:pointer">✕</b></div>';
+                    h += '<div class="sched-item"><span>🕒 '+s.on+' - '+s.off+'</span><b onclick="del(\\''+id+'\\','+i+')" style="color:#e74c3c; cursor:pointer">✕</b></div>';
                 });
                 h += '</div>';
-
-                // PHẦN 2: Ô nhập liệu (CHỈ HIỆN KHI BẤM "...")
                 if(openInputId === id) {
-                    h += '<div class="input-area">';
-                    h += '<input type="time" id="t1-'+id+'"> - <input type="time" id="t2-'+id+'"> ';
-                    h += '<button class="save-btn" onclick="add(\\''+id+'\\')">Lưu</button></div>';
+                    h += '<div class="input-area"><input type="time" id="t1-'+id+'"> - <input type="time" id="t2-'+id+'"> <button class="save-btn" onclick="add(\\''+id+'\\')">Lưu</button></div>';
                 }
-
                 h += '</div>';
             });
             container.innerHTML = h;
         }
 
-        function toggleInput(id) { 
-            openInputId = (openInputId === id) ? null : id; 
-            render(); 
-        }
-
-        async function toggle(id, st) {
-            await fetch('/relay?id='+id+'&state='+st);
-            loadImmediate();
-        }
-
+        function toggleInput(id) { openInputId = (openInputId === id) ? null : id; render(); }
+        async function toggle(id, st) { await fetch('/relay?id='+id+'&state='+st); loadImmediate(); }
         async function add(id) {
-            let t1 = document.getElementById('t1-'+id).value;
-            let t2 = document.getElementById('t2-'+id).value;
-            if(t1 && t2) {
-                await fetch('/add-sched?id='+id+'&on='+t1+'&off='+t2+'&days=1111111');
-                openInputId = null;
-                loadImmediate();
-            }
+            let t1 = document.getElementById('t1-'+id).value, t2 = document.getElementById('t2-'+id).value;
+            if(t1 && t2) { await fetch('/add-sched?id='+id+'&on='+t1+'&off='+t2+'&days=1111111'); openInputId = null; loadImmediate(); }
         }
-
-        async function del(id, i) {
-            await fetch('/del-sched?id='+id+'&idx='+i);
-            loadImmediate();
-        }
-
-        function rename(id, old) {
-            let n = prompt("Tên mới:", old);
-            if(n) fetch('/rename?id='+id+'&name='+encodeURIComponent(n)).then(loadImmediate);
-        }
-
-        async function loadImmediate() {
-            const r = await fetch('/all-data');
-            devices = await r.json();
-            render();
-        }
-
+        async function del(id, i) { await fetch('/del-sched?id='+id+'&idx='+i); loadImmediate(); }
+        function rename(id, old) { let n = prompt("Tên mới:", old); if(n) fetch('/rename?id='+id+'&name='+encodeURIComponent(n)).then(loadImmediate); }
+        async function loadImmediate() { const r = await fetch('/all-data'); devices = await r.json(); render(); }
         setInterval(load, 5000);
         load();
     </script>
