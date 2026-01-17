@@ -105,6 +105,7 @@ app.get('/rename', (req, res) => {
 });
 
 // --- 4. GIAO DIỆN HTML (ĐÃ FIX TỰ NHẢY NÚT) ---
+// --- 4. GIAO DIỆN HTML (CÓ CHỌN THỨ TRONG TUẦN) ---
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -119,9 +120,14 @@ app.get('/', (req, res) => {
         .btn-toggle { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; transition: 0.3s; }
         .ON { background: #2ecc71; color: white; box-shadow: 0 0 10px #2ecc71; }
         .OFF { background: #95a5a6; color: white; }
-        .input-area { margin-top: 15px; padding: 10px; background: #f0f4f8; border-radius: 8px; }
+        .input-area { margin-top: 15px; padding: 15px; background: #f0f4f8; border-radius: 8px; }
         .sched-item { display: flex; justify-content: space-between; padding: 8px; background: #fff; border-radius: 5px; margin-top: 5px; border: 1px solid #eee; }
-        .save-btn { background: #3498db; color: white; border: none; padding: 5px 15px; border-radius: 4px; }
+        .save-btn { background: #3498db; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        
+        /* Style cho phần chọn thứ trong tuần */
+        .days-picker { display: flex; justify-content: space-between; margin-top: 12px; margin-bottom: 12px; background: #fff; padding: 10px; border-radius: 6px; }
+        .day-box { text-align: center; font-size: 12px; flex: 1; }
+        .day-box input { display: block; margin: 5px auto 0; }
     </style>
 </head>
 <body>
@@ -132,11 +138,8 @@ app.get('/', (req, res) => {
         let devices = {};
         let openInputId = null; 
 
-
         async function load() {
-        // Nếu đang mở khung nhập liệu (openInputId không phải null) thì KHÔNG load lại
-            if (openInputId !== null) return; 
-
+            if (openInputId !== null) return; // Ngăn nhảy con trỏ khi đang cài đặt
             try {
                 const r = await fetch('/all-data');
                 devices = await r.json();
@@ -147,15 +150,15 @@ app.get('/', (req, res) => {
         function render() {
             const container = document.getElementById('list');
             const ids = Object.keys(devices);
-            if(ids.length === 0) { container.innerHTML = "Chưa có thiết bị nào kết nối"; return; }
+            if(ids.length === 0) { container.innerHTML = "Chưa có thiết bị nào"; return; }
             
             let h = "";
             ids.forEach(id => {
                 const d = devices[id];
                 h += '<div class="card">';
                 h += '<div class="flex"><div>';
-                h += '<b style="color:#2980b9; font-size:18px;" onclick="rename(\\''+id+'\\',\\''+d.name+'\\')">'+d.name+' ✎</b><br>';
-                h += '<small style="color:gray">ID: '+id+' | Wifi: '+d.wifi+'</small></div>';
+                h += '<b style="color:#2980b9; font-size:18px;">'+d.name+'</b><br>';
+                h += '<small style="color:gray">Wifi: '+d.wifi+'</small></div>';
                 h += '<div><button class="btn-toggle '+d.state+'" onclick="toggle(\\''+id+'\\',\\''+(d.state==='ON'?'OFF':'ON')+'\\')">'+d.state+'</button>';
                 h += '<span onclick="toggleInput(\\''+id+'\\')" style="cursor:pointer; margin-left:15px; font-size:20px;">⚙</span></div></div>';
                 
@@ -166,44 +169,61 @@ app.get('/', (req, res) => {
                 h += '</div>';
 
                 if(openInputId === id) {
-                    h += '<div class="input-area"><b>Thêm giờ:</b><br><input type="time" id="t1-'+id+'"> | <input type="time" id="t2-'+id+'">';
-                    h += ' <button class="save-btn" onclick="add(\\''+id+'\\')">Lưu</button></div>';
+                    h += '<div class="input-area">';
+                    h += '<b>Thêm giờ:</b><br><div style="margin-top:8px;">';
+                    h += '<input type="time" id="t1-'+id+'"> sang <input type="time" id="t2-'+id+'"> ';
+                    h += '<button class="save-btn" onclick="add(\\''+id+'\\')">Lưu</button></div>';
+                    
+                    // Phần chọn các thứ trong tuần
+                    h += '<div class="days-picker">';
+                    const dayNames = ["T2","T3","T4","T5","T6","T7","CN"];
+                    dayNames.forEach((name, index) => {
+                        h += '<div class="day-box">'+name+'<input type="checkbox" class="day-check-'+id+'" value="'+index+'" checked></div>';
+                    });
+                    h += '<div class="day-box">All<input type="checkbox" id="all-'+id+'" onchange="toggleAll(\\''+id+'\\')" checked></div>';
+                    h += '</div>';
+                    h += '</div>';
                 }
                 h += '</div>';
             });
             container.innerHTML = h;
         }
 
+        function toggleAll(id) {
+            const isChecked = document.getElementById('all-'+id).checked;
+            document.querySelectorAll('.day-check-'+id).forEach(el => el.checked = isChecked);
+        }
+
         function toggleInput(id) { openInputId = (openInputId === id) ? null : id; render(); }
         
         async function toggle(id, st) { 
-            // Cập nhật giao diện tạm thời để người dùng thấy mượt
             devices[id].state = st; render();
             await fetch('/relay?id='+id+'&state='+st); 
         }
 
         async function add(id) {
-            let t1 = document.getElementById('t1-'+id).value, t2 = document.getElementById('t2-'+id).value;
+            let t1 = document.getElementById('t1-'+id).value;
+            let t2 = document.getElementById('t2-'+id).value;
+            
+            // Tạo chuỗi 7 ký tự (ví dụ 1111111 cho tất cả các ngày)
+            let daysArr = ["0","0","0","0","0","0","0"];
+            document.querySelectorAll('.day-check-'+id).forEach(el => {
+                if(el.checked) daysArr[el.value] = "1";
+            });
+            let daysStr = daysArr.join("");
+
             if(t1 && t2) { 
-                await fetch('/add-sched?id='+id+'&on='+t1+'&off='+t2+'&days=1111111'); 
+                await fetch('/add-sched?id='+id+'&on='+t1+'&off='+t2+'&days='+daysStr); 
                 openInputId = null; load(); 
             }
         }
 
         async function del(id, i) { if(confirm("Xóa lịch này?")) { await fetch('/del-sched?id='+id+'&idx='+i); load(); } }
         
-        function rename(id, old) { 
-            let n = prompt("Tên thiết bị mới:", old); 
-            if(n) fetch('/rename?id='+id+'&name='+encodeURIComponent(n)).then(load); 
-        }
-
-        // Tự động cập nhật mỗi 3 giây để đồng bộ nút bấm
         setInterval(load, 3000);
         load();
     </script>
 </body>
 </html>
     `);
-});
-
-app.listen(10000);
+});app.listen(10000);
