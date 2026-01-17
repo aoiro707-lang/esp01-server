@@ -34,26 +34,30 @@ const saveData = () => {
 loadData();
 
 // --- 3. SMART PING ---
+// Tìm đoạn API /ping trong server.js của bạn và thay bằng đoạn này:
+
 app.get('/ping', (req, res) => {
-    const { id, wifi, name, state: espPhysState } = req.query;
-    if (!id) return res.send("No ID");
-    
-    if (!devices[id]) {
-        devices[id] = { name: name || "Relay", state: "OFF", schedules: [], wifi: wifi || "Unknown", lastUserAction: 0 };
-        saveData();
-    }
+    const { id, wifi, state: espPhysState } = req.query;
+    if (!id || !devices[id]) return res.send("OK");
     
     devices[id].wifi = wifi;
     devices[id].lastPing = Date.now();
 
     const serverWebState = devices[id].state;
+    // Kiểm tra xem người dùng có vừa nhấn nút trong 20 giây qua không
     const timeSinceLastClick = Date.now() - (devices[id].lastUserAction || 0);
 
     if (espPhysState) {
-        if (timeSinceLastClick < 15000) {
-            if (serverWebState !== espPhysState) return res.send(serverWebState === "ON" ? "TURN_ON" : "TURN_OFF");
-        } else {
+        if (timeSinceLastClick < 20000) { 
+            // TRƯỜNG HỢP 1: Người dùng vừa bấm nút -> Ép ESP theo Web
             if (serverWebState !== espPhysState) {
+                return res.send(serverWebState === "ON" ? "TURN_ON" : "TURN_OFF");
+            }
+        } else {
+            // TRƯỜNG HỢP 2: Lâu rồi không ai bấm nút (Lịch trình đang chạy)
+            // Nếu trạng thái ESP khác Web -> Cập nhật Web theo ESP
+            if (serverWebState !== espPhysState) {
+                console.log(`[Schedule Sync] Device ${id} changed to ${espPhysState}. Updating Web...`);
                 devices[id].state = espPhysState;
                 saveData();
             }
@@ -61,7 +65,6 @@ app.get('/ping', (req, res) => {
     }
     res.send("OK");
 });
-
 app.get('/all-data', (req, res) => res.json(devices));
 app.get('/relay', (req, res) => { 
     if(devices[req.query.id]) {
