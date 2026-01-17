@@ -132,7 +132,11 @@ app.get('/', (req, res) => {
         let devices = {};
         let openInputId = null; 
 
+
         async function load() {
+        // Nếu đang mở khung nhập liệu (openInputId không phải null) thì KHÔNG load lại
+            if (openInputId !== null) return; 
+
             try {
                 const r = await fetch('/all-data');
                 devices = await r.json();
