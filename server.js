@@ -131,7 +131,7 @@ app.get('/', (req, res) => {
     </style>
 </head>
 <body>
-    <h3 style="text-align:center;">ESP01s Smart Control by Hoàng Thi</h3>
+    <h3 style="text-align:center;">ESP01s Control by Hoàng Thi</h3>
     <div id="list">Đang tải thiết bị...</div>
 
     <script>
