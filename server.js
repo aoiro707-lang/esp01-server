@@ -11,6 +11,13 @@ app.use(express.json());
 const DATA_FILE = path.join(__dirname, 'devices_data.json');
 let devices = {}; 
 
+// --- 1. TỰ ĐỘNG NGĂN SERVER SLEEP ---
+const SERVER_URL = "https://esp01-server-1.onrender.com"; 
+setInterval(() => {
+    https.get(SERVER_URL, (res) => {}).on('error', (e) => {});
+}, 600000); 
+
+// --- 2. HÀM HỖ TRỢ ĐỌC/GHI FILE ---
 const loadData = () => {
     try {
         if (fs.existsSync(DATA_FILE)) {
@@ -26,7 +33,69 @@ const saveData = () => {
 
 loadData();
 
-// API Rename
+// --- 3. API ĐỒNG BỘ THÔNG MINH ---
+app.get('/ping', (req, res) => {
+    const { id, wifi, name, state: espPhysState } = req.query;
+    if (!id) return res.send("No ID");
+    
+    if (!devices[id]) {
+        devices[id] = { name: name || "Relay", state: "OFF", schedules: [], wifi: wifi || "Unknown", lastUserAction: 0 };
+        saveData();
+    }
+    
+    devices[id].wifi = wifi;
+    devices[id].lastPing = Date.now();
+
+    const serverWebState = devices[id].state;
+    const timeSinceLastClick = Date.now() - (devices[id].lastUserAction || 0);
+
+    if (espPhysState) {
+        // Nếu người dùng vừa bấm Web (< 15s) -> Ép ESP theo Web
+        if (timeSinceLastClick < 15000) {
+            if (serverWebState !== espPhysState) {
+                return res.send(serverWebState === "ON" ? "TURN_ON" : "TURN_OFF");
+            }
+        } 
+        // Nếu do Hẹn giờ (không có người bấm) -> Cập nhật Web theo ESP
+        else {
+            if (serverWebState !== espPhysState) {
+                console.log(`[Sync] Nút Web tự nhảy sang ${espPhysState}`);
+                devices[id].state = espPhysState;
+                saveData();
+            }
+        }
+    }
+    res.send("OK");
+});
+
+app.get('/all-data', (req, res) => res.json(devices));
+app.get('/status', (req, res) => res.json(devices[req.query.id] || {}));
+
+app.get('/relay', (req, res) => { 
+    if(devices[req.query.id]) {
+        devices[req.query.id].state = req.query.state; 
+        devices[req.query.id].lastUserAction = Date.now(); 
+        saveData();
+    }
+    res.send("OK"); 
+});
+
+app.get('/add-sched', (req, res) => { 
+    if(devices[req.query.id]) {
+        devices[req.query.id].schedules.push({on:req.query.on, off:req.query.off, days:req.query.days}); 
+        saveData();
+    }
+    res.send("OK"); 
+});
+
+app.get('/del-sched', (req, res) => { 
+    if(devices[req.query.id]) {
+        devices[req.query.id].schedules.splice(req.query.idx, 1); 
+        saveData();
+    }
+    res.send("OK"); 
+});
+
 app.get('/rename', (req, res) => { 
     if(devices[req.query.id]) {
         devices[req.query.id].name = req.query.name; 
@@ -35,43 +104,8 @@ app.get('/rename', (req, res) => {
     res.send("OK"); 
 });
 
-// Các API khác giữ nguyên...
-app.get('/ping', (req, res) => {
-    const { id, wifi, name, state: espPhysState } = req.query;
-    if (!id) return res.send("No ID");
-    if (!devices[id]) {
-        devices[id] = { name: name || "Relay", state: "OFF", schedules: [], wifi: wifi || "Unknown", lastUserAction: 0 };
-        saveData();
-    }
-    devices[id].wifi = wifi;
-    devices[id].lastPing = Date.now();
-    const serverWebState = devices[id].state;
-    const timeSinceLastClick = Date.now() - (devices[id].lastUserAction || 0);
-    if (espPhysState) {
-        if (timeSinceLastClick < 15000) {
-            if (serverWebState !== espPhysState) return res.send(serverWebState === "ON" ? "TURN_ON" : "TURN_OFF");
-        } else {
-            if (serverWebState !== espPhysState) { devices[id].state = espPhysState; saveData(); }
-        }
-    }
-    res.send("OK");
-});
-
-app.get('/all-data', (req, res) => res.json(devices));
-app.get('/relay', (req, res) => { 
-    if(devices[req.query.id]) { devices[req.query.id].state = req.query.state; devices[req.query.id].lastUserAction = Date.now(); saveData(); }
-    res.send("OK"); 
-});
-app.get('/add-sched', (req, res) => { 
-    if(devices[req.query.id]) { devices[req.query.id].schedules.push({on:req.query.on, off:req.query.off, days:req.query.days}); saveData(); }
-    res.send("OK"); 
-});
-app.get('/del-sched', (req, res) => { 
-    if(devices[req.query.id]) { devices[req.query.id].schedules.splice(req.query.idx, 1); saveData(); }
-    res.send("OK"); 
-});
-
-// --- GIAO DIỆN HTML ---
+// --- 4. GIAO DIỆN HTML (ĐÃ FIX TỰ NHẢY NÚT) ---
+// --- 4. GIAO DIỆN HTML (CÓ CHỌN THỨ TRONG TUẦN) ---
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
@@ -87,25 +121,25 @@ app.get('/', (req, res) => {
         .ON { background: #2ecc71; color: white; box-shadow: 0 0 10px #2ecc71; }
         .OFF { background: #95a5a6; color: white; }
         .input-area { margin-top: 15px; padding: 15px; background: #f0f4f8; border-radius: 8px; }
-        .sched-item { display: flex; justify-content: space-between; padding: 8px; background: #fff; border-radius: 5px; margin-top: 5px; border: 1px solid #eee; align-items: center; }
-        .day-label { background: #3498db; color: white; font-size: 10px; padding: 2px 5px; border-radius: 3px; margin-left: 3px; font-weight: bold; }
+        .sched-item { display: flex; justify-content: space-between; padding: 8px; background: #fff; border-radius: 5px; margin-top: 5px; border: 1px solid #eee; }
         .save-btn { background: #3498db; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        
+        /* Style cho phần chọn thứ trong tuần */
         .days-picker { display: flex; justify-content: space-between; margin-top: 12px; margin-bottom: 12px; background: #fff; padding: 10px; border-radius: 6px; }
-        .day-box { text-align: center; font-size: 11px; flex: 1; }
+        .day-box { text-align: center; font-size: 12px; flex: 1; }
         .day-box input { display: block; margin: 5px auto 0; }
     </style>
 </head>
 <body>
-    <h3 style="text-align:center;">ESP01s Smart Control</h3>
-    <div id="list">Đang tải...</div>
+    <h3 style="text-align:center;">ESP01s Smart Control by Hoàng Thi</h3>
+    <div id="list">Đang tải thiết bị...</div>
 
     <script>
         let devices = {};
-        let openInputId = null;
-        const DAY_NAMES = ["T2","T3","T4","T5","T6","T7","CN"];
+        let openInputId = null; 
 
         async function load() {
-            if (openInputId !== null) return;
+            if (openInputId !== null) return; // Ngăn nhảy con trỏ khi đang cài đặt
             try {
                 const r = await fetch('/all-data');
                 devices = await r.json();
@@ -123,33 +157,32 @@ app.get('/', (req, res) => {
                 const d = devices[id];
                 h += '<div class="card">';
                 h += '<div class="flex"><div>';
-                // ĐÃ THÊM LẠI SỰ KIỆN RENAME TẠI ĐÂY
-                h += '<b style="color:#2980b9; font-size:18px; cursor:pointer;" onclick="rename(\\''+id+'\\',\\''+d.name+'\\')">'+d.name+' ✎</b><br>';
+                h += '<b style="color:#2980b9; font-size:18px;">'+d.name+'</b><br>';
                 h += '<small style="color:gray">Wifi: '+d.wifi+'</small></div>';
                 h += '<div><button class="btn-toggle '+d.state+'" onclick="toggle(\\''+id+'\\',\\''+(d.state==='ON'?'OFF':'ON')+'\\')">'+d.state+'</button>';
                 h += '<span onclick="toggleInput(\\''+id+'\\')" style="cursor:pointer; margin-left:15px; font-size:20px;">⚙</span></div></div>';
                 
                 h += '<div style="margin-top:10px;"><b>Lịch trình:</b>';
                 (d.schedules || []).forEach((s, i) => {
-                    h += '<div class="sched-item"><div>🕒 '+s.on+' - '+s.off;
-                    if(s.days){
-                        for(let j=0; j<7; j++) if(s.days[j]==='1') h += '<span class="day-label">'+DAY_NAMES[j]+'</span>';
-                    }
-                    h += '</div><b onclick="del(\\''+id+'\\','+i+')" style="color:#e74c3c; cursor:pointer">✕</b></div>';
+                    h += '<div class="sched-item"><span>🕒 '+s.on+' - '+s.off+'</span><b onclick="del(\\''+id+'\\','+i+')" style="color:#e74c3c; cursor:pointer">✕</b></div>';
                 });
                 h += '</div>';
 
                 if(openInputId === id) {
                     h += '<div class="input-area">';
                     h += '<b>Thêm giờ:</b><br><div style="margin-top:8px;">';
-                    h += '<input type="time" id="t1-'+id+'"> - <input type="time" id="t2-'+id+'"> ';
+                    h += '<input type="time" id="t1-'+id+'"> | <input type="time" id="t2-'+id+'"> ';
                     h += '<button class="save-btn" onclick="add(\\''+id+'\\')">Lưu</button></div>';
+                    
+                    // Phần chọn các thứ trong tuần
                     h += '<div class="days-picker">';
-                    DAY_NAMES.forEach((name, index) => {
+                    const dayNames = ["T2","T3","T4","T5","T6","T7","CN"];
+                    dayNames.forEach((name, index) => {
                         h += '<div class="day-box">'+name+'<input type="checkbox" class="day-check-'+id+'" value="'+index+'" checked></div>';
                     });
                     h += '<div class="day-box">All<input type="checkbox" id="all-'+id+'" onchange="toggleAll(\\''+id+'\\')" checked></div>';
-                    h += '</div></div>';
+                    h += '</div>';
+                    h += '</div>';
                 }
                 h += '</div>';
             });
@@ -168,20 +201,19 @@ app.get('/', (req, res) => {
             await fetch('/relay?id='+id+'&state='+st); 
         }
 
-        async function rename(id, oldName) {
-            let newName = prompt("Nhập tên mới cho thiết bị:", oldName);
-            if (newName && newName !== oldName) {
-                await fetch('/rename?id=' + id + '&name=' + encodeURIComponent(newName));
-                load();
-            }
-        }
-
         async function add(id) {
-            let t1 = document.getElementById('t1-'+id).value, t2 = document.getElementById('t2-'+id).value;
+            let t1 = document.getElementById('t1-'+id).value;
+            let t2 = document.getElementById('t2-'+id).value;
+            
+            // Tạo chuỗi 7 ký tự (ví dụ 1111111 cho tất cả các ngày)
             let daysArr = ["0","0","0","0","0","0","0"];
-            document.querySelectorAll('.day-check-'+id).forEach(el => { if(el.checked) daysArr[el.value] = "1"; });
+            document.querySelectorAll('.day-check-'+id).forEach(el => {
+                if(el.checked) daysArr[el.value] = "1";
+            });
+            let daysStr = daysArr.join("");
+
             if(t1 && t2) { 
-                await fetch('/add-sched?id='+id+'&on='+t1+'&off='+t2+'&days='+daysArr.join("")); 
+                await fetch('/add-sched?id='+id+'&on='+t1+'&off='+t2+'&days='+daysStr); 
                 openInputId = null; load(); 
             }
         }
@@ -194,6 +226,4 @@ app.get('/', (req, res) => {
 </body>
 </html>
     `);
-});
-
-app.listen(10000);
+});app.listen(10000);
