@@ -171,7 +171,7 @@ app.get('/', (req, res) => {
                 if(openInputId === id) {
                     h += '<div class="input-area">';
                     h += '<b>Thêm giờ:</b><br><div style="margin-top:8px;">';
-                    h += '<input type="time" id="t1-'+id+'"> sang <input type="time" id="t2-'+id+'"> ';
+                    h += '<input type="time" id="t1-'+id+'"> | <input type="time" id="t2-'+id+'"> ';
                     h += '<button class="save-btn" onclick="add(\\''+id+'\\')">Lưu</button></div>';
                     
                     // Phần chọn các thứ trong tuần
