@@ -11,13 +11,6 @@ app.use(express.json());
 const DATA_FILE = path.join(__dirname, 'devices_data.json');
 let devices = {}; 
 
-// --- 1. TỰ ĐỘNG NGĂN SERVER SLEEP ---
-const SERVER_URL = "https://esp01-server-1.onrender.com"; 
-setInterval(() => {
-    https.get(SERVER_URL, (res) => {}).on('error', (e) => {});
-}, 600000); 
-
-// --- 2. HÀM HỖ TRỢ ĐỌC/GHI FILE ---
 const loadData = () => {
     try {
         if (fs.existsSync(DATA_FILE)) {
@@ -33,18 +26,16 @@ const saveData = () => {
 
 loadData();
 
-// --- 3. API ĐỒNG BỘ THÔNG MINH ---
 app.get('/ping', (req, res) => {
     const { id, wifi, name, state: espPhysState } = req.query;
     if (!id) return res.send("No ID");
     
     if (!devices[id]) {
         devices[id] = { name: name || "Relay", state: "OFF", schedules: [], wifi: wifi || "Unknown", lastUserAction: 0 };
-        saveData();
     }
     
     devices[id].wifi = wifi;
-    devices[id].lastPing = Date.now();
+    devices[id].lastPing = Date.now(); // Lưu thời điểm Ping cuối cùng
 
     const serverWebState = devices[id].state;
     const timeSinceLastClick = Date.now() - (devices[id].lastUserAction || 0);
@@ -61,12 +52,12 @@ app.get('/ping', (req, res) => {
             }
         }
     }
+    saveData();
     res.send("OK");
 });
 
 app.get('/all-data', (req, res) => res.json(devices));
 app.get('/status', (req, res) => res.json(devices[req.query.id] || {}));
-
 app.get('/relay', (req, res) => { 
     if(devices[req.query.id]) {
         devices[req.query.id].state = req.query.state; 
@@ -75,7 +66,6 @@ app.get('/relay', (req, res) => {
     }
     res.send("OK"); 
 });
-
 app.get('/add-sched', (req, res) => { 
     if(devices[req.query.id]) {
         devices[req.query.id].schedules.push({on:req.query.on, off:req.query.off, days:req.query.days}); 
@@ -83,7 +73,6 @@ app.get('/add-sched', (req, res) => {
     }
     res.send("OK"); 
 });
-
 app.get('/del-sched', (req, res) => { 
     if(devices[req.query.id]) {
         devices[req.query.id].schedules.splice(req.query.idx, 1); 
@@ -91,7 +80,6 @@ app.get('/del-sched', (req, res) => {
     }
     res.send("OK"); 
 });
-
 app.get('/rename', (req, res) => { 
     if(devices[req.query.id]) {
         devices[req.query.id].name = req.query.name; 
@@ -112,15 +100,15 @@ app.get('/', (req, res) => {
         .card { background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .flex { display: flex; justify-content: space-between; align-items: center; }
         .btn-toggle { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; transition: 0.3s; }
-        .ON { background: #2ecc71; color: white; box-shadow: 0 0 10px #2ecc71; }
+        .ON { background: #2ecc71; color: white; }
         .OFF { background: #95a5a6; color: white; }
         .input-area { margin-top: 15px; padding: 15px; background: #f0f4f8; border-radius: 8px; }
-        .sched-item { display: flex; justify-content: space-between; padding: 8px; background: #fff; border-radius: 5px; margin-top: 5px; border: 1px solid #eee; align-items: center; }
-        .save-btn { background: #3498db; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        .day-label { background: #3498db; color: white; font-size: 10px; padding: 2px 5px; border-radius: 3px; margin-left: 3px; font-weight: bold; }
-        .days-picker { display: flex; justify-content: space-between; margin-top: 12px; margin-bottom: 12px; background: #fff; padding: 10px; border-radius: 6px; }
+        .sched-item { display: flex; justify-content: space-between; padding: 8px; background: #fff; border-radius: 5px; margin-top: 5px; border: 1px solid #eee; }
+        .day-label { background: #3498db; color: white; font-size: 10px; padding: 2px 5px; border-radius: 3px; margin-left: 3px; }
+        .days-picker { display: flex; justify-content: space-between; margin-top: 12px; background: #fff; padding: 10px; border-radius: 6px; }
         .day-box { text-align: center; font-size: 11px; flex: 1; }
-        .day-box input { display: block; margin: 5px auto 0; }
+        .offline-text { color: #e74c3c !important; } /* Màu đỏ cho offline */
+        .online-text { color: #2980b9; } /* Màu xanh cho online */
     </style>
 </head>
 <body>
@@ -146,31 +134,36 @@ app.get('/', (req, res) => {
             const ids = Object.keys(devices);
             if(ids.length === 0) { container.innerHTML = "Chưa có thiết bị nào"; return; }
             let h = "";
+            const now = Date.now();
+
             ids.forEach(id => {
                 const d = devices[id];
+                // Kiểm tra nếu lastPing cách hiện tại quá 15 giây thì coi là Offline
+                const isOffline = !d.lastPing || (now - d.lastPing > 15000);
+                const nameClass = isOffline ? 'offline-text' : 'online-text';
+
                 h += '<div class="card">';
                 h += '<div class="flex"><div>';
-                h += '<b style="color:#2980b9; font-size:18px; cursor:pointer;" onclick="renameDevice(\\''+id+'\\',\\''+d.name+'\\')">'+d.name+' ✎</b><br>';
-                h += '<small style="color:gray">Wifi: '+d.wifi+'</small></div>';
+                h += '<b class="'+nameClass+'" style="font-size:18px; cursor:pointer;" onclick="renameDevice(\\''+id+'\\',\\''+d.name+'\\')">'+d.name+' ✎</b><br>';
+                h += '<small style="color:gray">Wifi: '+d.wifi+' '+(isOffline ? '(Mất kết nối)' : '')+'</small></div>';
                 h += '<div><button class="btn-toggle '+d.state+'" onclick="toggle(\\''+id+'\\',\\''+(d.state==='ON'?'OFF':'ON')+'\\')">'+d.state+'</button>';
                 h += '<span onclick="toggleInput(\\''+id+'\\')" style="cursor:pointer; margin-left:15px; font-size:20px;">⚙</span></div></div>';
+                
                 h += '<div style="margin-top:10px;"><b>Lịch trình:</b>';
                 (d.schedules || []).forEach((s, i) => {
                     h += '<div class="sched-item"><div>🕒 '+s.on+' - '+s.off;
-                    if(s.days) {
-                        for(let j=0; j<7; j++) if(s.days[j] === '1') h += '<span class="day-label">'+dayNames[j]+'</span>';
-                    }
+                    if(s.days) for(let j=0; j<7; j++) if(s.days[j] === '1') h += '<span class="day-label">'+dayNames[j]+'</span>';
                     h += '</div><b onclick="del(\\''+id+'\\','+i+')" style="color:#e74c3c; cursor:pointer">✕</b></div>';
                 });
                 h += '</div>';
+
                 if(openInputId === id) {
                     h += '<div class="input-area"><b>Thêm giờ:</b><br><input type="time" id="t1-'+id+'"> | <input type="time" id="t2-'+id+'"> ';
-                    h += '<button class="save-btn" onclick="add(\\''+id+'\\')">Lưu</button>';
+                    h += '<button style="background:#3498db; color:white; border:none; padding:5px 10px;" onclick="add(\\''+id+'\\')">Lưu</button>';
                     h += '<div class="days-picker">';
                     dayNames.forEach((name, index) => {
                         h += '<div class="day-box">'+name+'<input type="checkbox" class="day-check-'+id+'" value="'+index+'" checked></div>';
                     });
-                    h += '<div class="day-box">All<input type="checkbox" id="all-'+id+'" onchange="toggleAll(\\''+id+'\\')" checked></div>';
                     h += '</div></div>';
                 }
                 h += '</div>';
@@ -178,11 +171,6 @@ app.get('/', (req, res) => {
             container.innerHTML = h;
         }
 
-        function toggleAll(id) {
-            const isChecked = document.getElementById('all-'+id).checked;
-            document.querySelectorAll('.day-check-'+id).forEach(el => el.checked = isChecked);
-        }
-        function toggleInput(id) { openInputId = (openInputId === id) ? null : id; render(); }
         async function toggle(id, st) { 
             devices[id].state = st; render();
             await fetch('/relay?id='+id+'&state='+st); 
@@ -200,7 +188,8 @@ app.get('/', (req, res) => {
                 openInputId = null; load(); 
             }
         }
-        async function del(id, i) { if(confirm("Xóa lịch này?")) { await fetch('/del-sched?id='+id+'&idx='+i); load(); } }
+        async function del(id, i) { if(confirm("Xóa lịch?")) { await fetch('/del-sched?id='+id+'&idx='+i); load(); } }
+        function toggleInput(id) { openInputId = (openInputId === id) ? null : id; render(); }
         setInterval(load, 3000);
         load();
     </script>
