@@ -76,9 +76,16 @@ app.get('/status', (req, res) => {
 });
 
 // API Điều khiển
+// Tìm đến route /relay và cập nhật như sau:
 app.get('/relay', checkAuth, (req, res) => {
     const { id, state } = req.query;
-    if(devices[id]) { devices[id].state = state; devices[id].lastUserAction = Date.now(); saveData(); }
+    if(devices[id]) {
+        devices[id].state = state;
+        // Ghi đè thời gian thao tác mới nhất
+        devices[id].lastUserAction = Date.now(); 
+        saveData();
+        console.log(`[Manual] Device ${id} set to ${state}`);
+    }
     res.send("OK");
 });
 
