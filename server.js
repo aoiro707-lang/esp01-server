@@ -77,14 +77,15 @@ app.get('/status', (req, res) => {
 
 // API Điều khiển
 // Tìm đến route /relay và cập nhật như sau:
+// Tìm đến route /relay và đảm bảo nó như sau:
 app.get('/relay', checkAuth, (req, res) => {
     const { id, state } = req.query;
     if(devices[id]) {
         devices[id].state = state;
-        // Ghi đè thời gian thao tác mới nhất
+        // Cập nhật thời gian thực hiện lệnh tay (Unix Timestamp)
         devices[id].lastUserAction = Date.now(); 
         saveData();
-        console.log(`[Manual] Device ${id} set to ${state}`);
+        console.log(`[Manual] Device ${id} set to ${state} at ${new Date(devices[id].lastUserAction).toISOString()}`);
     }
     res.send("OK");
 });
