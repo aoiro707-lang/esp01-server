@@ -11,8 +11,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // --- BẢO MẬT ---
-const ADMIN_USER = "admin";
-const ADMIN_PASS = "123456";
+const ADMIN_USER = "aoiro707";
+const ADMIN_PASS = "251587";
 
 app.use(session({
     secret: 'secret-key-esp01',
