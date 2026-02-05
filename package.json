@@ -1,13 +1,14 @@
 {
-  "name": "esp01-server-1",
+  "name": "esp01-server",
   "version": "1.0.0",
+  "description": "ESP01 Multi-user Control Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "node-fetch": "^2.6.7"
+    "express-session": "^1.17.3",
+    "cors": "^2.8.5"
   }
 }
