@@ -11,8 +11,36 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // --- BẢO MẬT ---
-const ADMIN_USER = "aoiro707";
-const ADMIN_PASS = "251587";
+
+// --- DANH SÁCH USER VÀ THIẾT BỊ SỞ HỮU ---
+const USERS = {
+    "admin1": { pass: "111", ownedDevices: ["ESP01_ID_1", "ESP01_ID_2", "ESP01_ID_3"] },
+    "admin2": { pass: "222", ownedDevices: ["ESP01_ID_4", "ESP01_ID_5", "ESP01_ID_6"] }
+};
+
+// --- ROUTE LOGIN CẬP NHẬT ---
+app.post('/login', (req, res) => {
+    const { user, pass } = req.body;
+    if (USERS[user] && USERS[user].pass === pass) {
+        req.session.isLoggedIn = true;
+        req.session.username = user; // Lưu tên user vào session
+        res.redirect('/');
+    } else res.redirect('/login?error=1');
+});
+
+// --- API LẤY DATA ĐÃ PHÂN QUYỀN ---
+app.get('/all-data', checkAuth, (req, res) => {
+    const currentUser = req.session.username;
+    const ownedIds = USERS[currentUser].ownedDevices;
+    
+    // Lọc danh sách thiết bị: chỉ lấy những ID thuộc sở hữu của user này
+    let filteredDevices = {};
+    ownedIds.forEach(id => {
+        if (devices[id]) {
+            filteredDevices[id] = devices[id];
+        }
+    });
+    res.json(filteredDevices);
 
 app.use(session({
     secret: 'secret-key-esp01',
